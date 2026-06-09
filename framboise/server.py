@@ -146,6 +146,10 @@ def _make_entry(
         "restore_cmd": (
             f"rsync -avz --progress {FRAMBOISE_HOST}:{dest}/ {source_path}/"
         ),
+        # pull from framboise into current working directory
+        "fetch_cmd": (
+            f"rsync -avz --progress {FRAMBOISE_HOST}:{dest}/ ./"
+        ),
         # push from original location back to framboise
         "push_cmd": (
             f"rsync -avz --progress --delete {user_prefix}{source_path}/ {FRAMBOISE_HOST}:{dest}/"
@@ -352,6 +356,7 @@ def _codeblock(code: str, label: str = "") -> str:
 def _row(e: dict) -> str:
     sp = html.escape(e["source_path"])
     restore = html.escape(e["restore_cmd"])
+    fetch = html.escape(e["fetch_cmd"])
     push = html.escape(e["push_cmd"])
     return (
         f'<tr>'
@@ -364,6 +369,11 @@ def _row(e: dict) -> str:
         f'    <span class="cmd-label">restore</span>'
         f'    <code class="cmd-text" title="{restore}">{restore}</code>'
         f'    <button class="copy-btn" data-cmd="{restore}">copy</button>'
+        f'  </div>'
+        f'  <div class="cmd-row">'
+        f'    <span class="cmd-label">fetch</span>'
+        f'    <code class="cmd-text" title="{fetch}">{fetch}</code>'
+        f'    <button class="copy-btn" data-cmd="{fetch}">copy</button>'
         f'  </div>'
         f'  <div class="cmd-row">'
         f'    <span class="cmd-label">push</span>'
