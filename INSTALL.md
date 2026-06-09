@@ -161,7 +161,8 @@ ssh-copy-id framboise
 Copy `client/push.sh` to any machine you want to back up, then run it pointing at the directory you want to sync.
 
 ```bash
-# Copy the script once
+# Create ~/bin if it doesn't exist, then copy the script
+mkdir -p ~/bin
 scp framboise:~/backer/client/push.sh ~/bin/push-to-framboise
 chmod +x ~/bin/push-to-framboise
 

@@ -170,6 +170,16 @@ _CSS = """
       --code-bg: #1c2128; --btn: #1f6feb; --btn-fg: #fff; --btn-ok: #238636;
     }
   }
+  html.dark {
+    --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e;
+    --border: #30363d; --card: #161b22; --accent: #58a6ff;
+    --code-bg: #1c2128; --btn: #1f6feb; --btn-fg: #fff; --btn-ok: #238636;
+  }
+  html.light {
+    --bg: #f8f9fa; --fg: #212529; --muted: #6c757d;
+    --border: #dee2e6; --card: #fff; --accent: #0d6efd;
+    --code-bg: #e9ecef; --btn: #0d6efd; --btn-fg: #fff; --btn-ok: #198754;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
          background: var(--bg); color: var(--fg); padding: 1.5rem 2rem; }
@@ -215,8 +225,12 @@ _CSS = """
   .copy-btn:hover  { opacity: 0.85; }
   .copy-btn.copied { background: var(--btn-ok); }
   .empty { padding: 2rem; color: var(--muted); text-align: center; }
-  .refresh { float: right; font-size: 0.8rem; color: var(--accent); cursor: pointer;
+  .refresh { font-size: 0.8rem; color: var(--accent); cursor: pointer;
              background: none; border: none; text-decoration: underline; }
+  .hdr-actions { float: right; display: flex; gap: 0.75rem; align-items: center; }
+  .theme-toggle { font-size: 0.8rem; color: var(--muted); cursor: pointer;
+                  background: none; border: 1px solid var(--border);
+                  border-radius: 4px; padding: 0.15rem 0.5rem; }
   /* how-to page */
   .guide { max-width: 52rem; }
   .guide section { margin-bottom: 2.25rem; }
@@ -241,18 +255,52 @@ _CSS = """
 """
 
 _JS = """
+  function markCopied(btn) {
+    const orig = btn.textContent;
+    btn.textContent = 'copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1600);
+  }
+  function copyFallback(text, btn) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); markCopied(btn); } catch(e) {}
+    document.body.removeChild(ta);
+  }
   document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      navigator.clipboard.writeText(btn.dataset.cmd).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = 'copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1600);
-      });
+      const cmd = btn.dataset.cmd;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(cmd).then(() => markCopied(btn)).catch(() => copyFallback(cmd, btn));
+      } else {
+        copyFallback(cmd, btn);
+      }
     });
   });
   const refreshBtn = document.getElementById('refresh');
   if (refreshBtn) refreshBtn.addEventListener('click', () => location.reload());
+
+  (function() {
+    const root = document.documentElement;
+    const btn  = document.getElementById('theme-toggle');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const saved = localStorage.getItem('backer-theme');
+    const isDark = saved ? saved === 'dark' : prefersDark;
+    function apply(dark) {
+      root.classList.toggle('dark', dark);
+      root.classList.toggle('light', !dark);
+      btn.textContent = dark ? 'light' : 'dark';
+    }
+    apply(isDark);
+    btn.addEventListener('click', () => {
+      const nowDark = !root.classList.contains('dark');
+      localStorage.setItem('backer-theme', nowDark ? 'dark' : 'light');
+      apply(nowDark);
+    });
+  })();
 """
 
 
@@ -268,6 +316,9 @@ def _page(title: str, body: str) -> str:
 </head>
 <body>
   <header>
+    <div class="hdr-actions">
+      <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">dark</button>
+    </div>
     <h1>Backer &mdash; <em>{fh}</em></h1>
     <nav class="topnav">
       <a href="/">Dashboard</a><a href="/how-to">How to back up</a>
@@ -281,12 +332,15 @@ def _page(title: str, body: str) -> str:
 
 
 def _codeblock(code: str, label: str = "") -> str:
-    escaped = html.escape(code)
+    escaped_html = html.escape(code)
+    # Encode newlines as &#10; so the attribute value is safe across all browsers.
+    # (Literal newlines in attributes are spec-valid but handled inconsistently.)
+    escaped_attr = escaped_html.replace('\n', '&#10;')
     lbl = f'<span class="label">{html.escape(label)}</span>' if label else ""
     return (
         f'<div class="codeblock">{lbl}'
-        f'<pre>{escaped}</pre>'
-        f'<button class="copy-btn" data-cmd="{escaped}">copy</button>'
+        f'<pre>{escaped_html}</pre>'
+        f'<button class="copy-btn" data-cmd="{escaped_attr}">copy</button>'
         f'</div>'
     )
 
@@ -371,6 +425,7 @@ def render_howto() -> str:
     br = html.escape(str(BACKUP_ROOT))
 
     get_script = _codeblock(
+        f"mkdir -p ~/bin\n"
         f"scp {FRAMBOISE_HOST}:~/backer/client/push.sh ~/bin/push-to-{FRAMBOISE_HOST}\n"
         f"chmod +x ~/bin/push-to-{FRAMBOISE_HOST}",
         label="get the script (run on your machine)",
