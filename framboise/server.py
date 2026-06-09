@@ -25,9 +25,9 @@ MANIFEST_FILENAME = ".backer-info"
 def human_size(size_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size_bytes < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
+            return f"{size_bytes:.0f} {unit}"
         size_bytes /= 1024.0
-    return f"{size_bytes:.1f} PB"
+    return f"{size_bytes:.0f} PB"
 
 
 def dir_stats(path: Path) -> tuple[int, int, float]:
@@ -140,7 +140,7 @@ def _make_entry(
         "size_human": human_size(size),
         "files": count,
         "last_sync_str": (
-            datetime.fromtimestamp(newest).strftime("%Y-%m-%d %H:%M") if newest else "—"
+            datetime.fromtimestamp(newest).strftime("%Y-%m-%d") if newest else "—"
         ),
         # pull from framboise to original location
         "restore_cmd": (
