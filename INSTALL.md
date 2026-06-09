@@ -166,6 +166,19 @@ mkdir -p ~/bin
 scp framboise:~/backer/client/push.sh ~/bin/push-to-framboise
 chmod +x ~/bin/push-to-framboise
 
+# If ~/bin was just created, reload your shell config so it appears in $PATH
+source ~/.bashrc   # or: source ~/.profile
+```
+
+If `push-to-framboise` is still not found after reloading, your shell config may not auto-add `~/bin`. Either call it by full path (`~/bin/push-to-framboise`) or add this line to `~/.bashrc` manually:
+
+```bash
+export PATH="$HOME/bin:$PATH"
+```
+
+Then `source ~/.bashrc` and confirm with `which push-to-framboise`.
+
+```bash
 # Back up a directory
 push-to-framboise /home/nick/documents
 push-to-framboise /etc
