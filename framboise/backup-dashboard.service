@@ -1,0 +1,18 @@
+[Unit]
+Description=Backer Dashboard
+Documentation=https://github.com/nryberg/backer
+After=network.target local-fs.target mnt-backup.mount
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/backer
+Environment=BACKUP_ROOT=/mnt/backup
+Environment=PORT=8765
+Environment=FRAMBOISE_HOST=framboise
+ExecStart=/usr/bin/python3 /opt/backer/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
