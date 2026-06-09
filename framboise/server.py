@@ -87,15 +87,29 @@ def get_backups() -> dict[str, list[dict]]:
             _make_entry(hostname, source_path, source_user, backup_dir, size, count, newest)
         )
 
+    # Filesystem artifacts that appear at the root of ext4/exFAT/NTFS volumes
+    _FS_SKIP = {"lost+found", "$RECYCLE.BIN", ".Spotlight-V100", ".fseventsd", "System Volume Information"}
+
     # Fallback: host dirs that have no markers at all
-    for host_dir in sorted(BACKUP_ROOT.iterdir()):
+    try:
+        top_entries = sorted(BACKUP_ROOT.iterdir())
+    except PermissionError:
+        return result
+
+    for host_dir in top_entries:
         if not host_dir.is_dir():
+            continue
+        if host_dir.name in _FS_SKIP or host_dir.name.startswith("."):
             continue
         hostname = host_dir.name
         if hostname in result:
             continue
         # Show top-level subdirs as backup roots
-        for child in sorted(host_dir.iterdir()):
+        try:
+            children = sorted(host_dir.iterdir())
+        except PermissionError:
+            continue
+        for child in children:
             if not child.is_dir() or child in seen_dirs:
                 continue
             source_path = "/" + child.name
