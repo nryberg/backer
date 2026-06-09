@@ -66,12 +66,19 @@ chmod +x "${INSTALL_DIR}/server.py"
 echo "Installed server.py → $INSTALL_DIR"
 
 # ---- Systemd service ----
+# Derive the systemd mount unit name for MOUNT so we can declare an
+# ordering dependency (Wants + After). This keeps the dashboard from
+# starting before the USB SSD is mounted after a reboot.
+# systemd-escape handles paths with spaces or unusual characters.
+MOUNT_UNIT=$(systemd-escape --path --suffix=mount "$MOUNT" 2>/dev/null || true)
+
 SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Backer Dashboard
 Documentation=https://github.com/nryberg/backer
-After=network.target local-fs.target
+After=network.target local-fs.target ${MOUNT_UNIT}
+Wants=${MOUNT_UNIT}
 
 [Service]
 Type=simple

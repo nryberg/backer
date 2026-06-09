@@ -2,6 +2,7 @@
 Description=Backer Dashboard
 Documentation=https://github.com/nryberg/backer
 After=network.target local-fs.target mnt-backup.mount
+Wants=mnt-backup.mount
 
 [Service]
 Type=simple
