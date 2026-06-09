@@ -53,6 +53,11 @@ else
   echo "No device specified — skipping mount (you can mount $MOUNT manually or re-run with a device)"
 fi
 
+# Allow any SSH user to create their own hostname directory.
+# Sticky bit prevents users from removing each other's directories.
+chmod 1777 "$MOUNT"
+echo "Set permissions on $MOUNT (1777)"
+
 # ---- Install server ----
 mkdir -p "$INSTALL_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
