@@ -170,13 +170,32 @@ chmod +x ~/bin/push-to-framboise
 source ~/.bashrc   # or: source ~/.profile
 ```
 
-If `push-to-framboise` is still not found after reloading, your shell config may not auto-add `~/bin`. Either call it by full path (`~/bin/push-to-framboise`) or add this line to `~/.bashrc` manually:
+If `push-to-framboise` is still not found after reloading, `~/bin` is not in your `$PATH`. Add it permanently using the block below for your shell, then reload:
 
+**bash** (`~/.bashrc`):
 ```bash
+cat >> ~/.bashrc <<'EOF'
+
+# add ~/bin to PATH
 export PATH="$HOME/bin:$PATH"
+EOF
+source ~/.bashrc
 ```
 
-Then `source ~/.bashrc` and confirm with `which push-to-framboise`.
+**zsh** (`~/.zshrc`):
+```bash
+cat >> ~/.zshrc <<'EOF'
+
+# add ~/bin to PATH
+export PATH="$HOME/bin:$PATH"
+EOF
+source ~/.zshrc
+```
+
+Confirm it worked:
+```bash
+which push-to-framboise   # should print ~/bin/push-to-framboise
+```
 
 ```bash
 # Back up a directory
