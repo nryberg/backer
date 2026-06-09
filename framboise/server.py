@@ -541,6 +541,29 @@ def render_howto() -> str:
     )
     restore_example = _codeblock(restore_cmd)
 
+    path_bash = _codeblock(
+        "cat >> ~/.bashrc <<'EOF'\n\n"
+        "# add ~/bin to PATH\n"
+        "export PATH=\"$HOME/bin:$PATH\"\n"
+        "EOF\n"
+        "source ~/.bashrc",
+        label="bash (~/.bashrc)",
+    )
+
+    path_zsh = _codeblock(
+        "cat >> ~/.zshrc <<'EOF'\n\n"
+        "# add ~/bin to PATH\n"
+        "export PATH=\"$HOME/bin:$PATH\"\n"
+        "EOF\n"
+        "source ~/.zshrc",
+        label="zsh (~/.zshrc)",
+    )
+
+    path_verify = _codeblock(
+        f"which push-to-{FRAMBOISE_HOST}",
+        label="confirm it worked",
+    )
+
     body = f"""
 <div class="guide">
 
@@ -561,6 +584,18 @@ def render_howto() -> str:
     {use_script}
     <p>The script prints the source and destination before syncing, then updates the
     dashboard automatically. Open <a href="/">the dashboard</a> to confirm.</p>
+  </section>
+
+  <section>
+    <h2>If push-to-{fh} is not found</h2>
+    <p><code>~/bin</code> is only added to <code>$PATH</code> at login time, so if you
+    just created it you need to add it permanently and reload your shell config.</p>
+    <p><strong>bash</strong></p>
+    {path_bash}
+    <p><strong>zsh</strong> (default on macOS)</p>
+    {path_zsh}
+    {path_verify}
+    <p>Not sure which shell you are using? Run <code>echo $SHELL</code>.</p>
   </section>
 
   <section>
