@@ -223,11 +223,21 @@ _CSS = """
               background: var(--code-bg); padding: 0.2rem 0.45rem; border-radius: 4px;
               flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               max-width: 34rem; display: block; color: var(--fg); }
-  .copy-btn { flex-shrink: 0; font-size: 0.73rem; padding: 0.2rem 0.55rem;
+  .copy-btn { flex-shrink: 0; font-size: 0.82rem; font-weight: 600;
+              padding: 0.35rem 0.85rem;
               background: var(--btn); color: var(--btn-fg); border: none;
-              border-radius: 4px; cursor: pointer; white-space: nowrap; }
+              border-radius: 5px; cursor: pointer; white-space: nowrap; }
   .copy-btn:hover  { opacity: 0.85; }
   .copy-btn.copied { background: var(--btn-ok); }
+  /* search */
+  .search-wrap { margin-bottom: 1.5rem; }
+  #search { width: 100%; max-width: 28rem; padding: 0.5rem 0.85rem;
+            font-size: 0.95rem; border: 1px solid var(--border);
+            border-radius: 6px; background: var(--card); color: var(--fg);
+            outline: none; }
+  #search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+  .machine.hidden { display: none; }
+  tr.hidden { display: none; }
   .empty { padding: 2rem; color: var(--muted); text-align: center; }
   .refresh { font-size: 0.8rem; color: var(--accent); cursor: pointer;
              background: none; border: none; text-decoration: underline; }
@@ -286,6 +296,27 @@ _JS = """
   });
   const refreshBtn = document.getElementById('refresh');
   if (refreshBtn) refreshBtn.addEventListener('click', () => location.reload());
+
+  const searchBox = document.getElementById('search');
+  if (searchBox) {
+    searchBox.addEventListener('input', () => {
+      const q = searchBox.value.trim().toLowerCase();
+      document.querySelectorAll('.machine').forEach(machine => {
+        const host = (machine.dataset.host || '').toLowerCase();
+        let anyVisible = false;
+        machine.querySelectorAll('tbody tr').forEach(row => {
+          const path = (row.querySelector('.col-path') || {}).textContent || '';
+          const match = !q || host.includes(q) || path.toLowerCase().includes(q);
+          row.classList.toggle('hidden', !match);
+          if (match) anyVisible = true;
+        });
+        machine.classList.toggle('hidden', !anyVisible);
+      });
+    });
+    searchBox.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { searchBox.value = ''; searchBox.dispatchEvent(new Event('input')); }
+    });
+  }
 
   (function() {
     const root = document.documentElement;
@@ -395,7 +426,7 @@ def render_dashboard(backups: dict[str, list]) -> str:
         host_size = human_size(sum(e["size"] for e in entries))
         rows = "".join(_row(e) for e in sorted(entries, key=lambda x: x["source_path"]))
         machines_html += (
-            f'<div class="machine">'
+            f'<div class="machine" data-host="{html.escape(hostname)}">'
             f'  <h2><strong>{html.escape(hostname)}</strong>'
             f'      <span class="total">{html.escape(host_size)}</span></h2>'
             f'  <table>'
@@ -420,6 +451,9 @@ def render_dashboard(backups: dict[str, list]) -> str:
         f'  <div class="stat"><div class="val">{len(backups)}</div><div class="lbl">Machines</div></div>'
         f'  <div class="stat"><div class="val">{human_size(total_size)}</div><div class="lbl">Total size</div></div>'
         f'  <div class="stat"><div class="val">{total_files:,}</div><div class="lbl">Files</div></div>'
+        f'</div>'
+        f'<div class="search-wrap">'
+        f'  <input id="search" type="search" placeholder="Filter by hostname or path&hellip;" autocomplete="off">'
         f'</div>'
         f'{machines_html}'
     )
