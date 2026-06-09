@@ -154,7 +154,7 @@ def _make_entry(
 
 
 # ---------------------------------------------------------------------------
-# HTML rendering
+# HTML rendering — shared chrome
 # ---------------------------------------------------------------------------
 
 _CSS = """
@@ -177,7 +177,10 @@ _CSS = """
   header { margin-bottom: 1.5rem; }
   h1 { font-size: 1.5rem; font-weight: 700; }
   h1 em { color: var(--accent); font-style: normal; }
+  nav.topnav { font-size: 0.83rem; margin-top: 0.5rem; }
+  nav.topnav a { margin-right: 1.2rem; }
   .meta { color: var(--muted); font-size: 0.83rem; margin-top: 0.3rem; }
+  /* dashboard */
   .stats { display: flex; gap: 1.25rem; margin: 1.25rem 0 2rem; flex-wrap: wrap; }
   .stat { background: var(--card); border: 1px solid var(--border);
           border-radius: 8px; padding: 0.7rem 1.2rem; min-width: 7rem; }
@@ -212,9 +215,29 @@ _CSS = """
   .copy-btn:hover  { opacity: 0.85; }
   .copy-btn.copied { background: var(--btn-ok); }
   .empty { padding: 2rem; color: var(--muted); text-align: center; }
-  footer { color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
   .refresh { float: right; font-size: 0.8rem; color: var(--accent); cursor: pointer;
              background: none; border: none; text-decoration: underline; }
+  /* how-to page */
+  .guide { max-width: 52rem; }
+  .guide section { margin-bottom: 2.25rem; }
+  .guide h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem;
+              padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  .guide p { line-height: 1.65; margin-bottom: 0.7rem; }
+  .guide p:last-child { margin-bottom: 0; }
+  .guide ul { padding-left: 1.4rem; line-height: 1.8; }
+  .codeblock { position: relative; background: var(--code-bg); border: 1px solid var(--border);
+               border-radius: 6px; margin: 0.75rem 0; }
+  .codeblock pre { font-family: ui-monospace, monospace; font-size: 0.82rem; line-height: 1.55;
+                   padding: 0.85rem 3.5rem 0.85rem 1rem; overflow-x: auto; color: var(--fg); }
+  .codeblock .copy-btn { position: absolute; top: 0.45rem; right: 0.45rem; }
+  .codeblock .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+                      color: var(--muted); padding: 0.35rem 1rem 0 1rem; display: block; }
+  .mapping { font-family: ui-monospace, monospace; font-size: 0.82rem; line-height: 1.9;
+             background: var(--code-bg); border: 1px solid var(--border);
+             border-radius: 6px; padding: 0.9rem 1.1rem; margin: 0.75rem 0; }
+  .mapping .arr { color: var(--accent); }
+  /* shared footer */
+  footer { color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
 """
 
 _JS = """
@@ -228,9 +251,49 @@ _JS = """
       });
     });
   });
-  document.getElementById('refresh').addEventListener('click', () => location.reload());
+  const refreshBtn = document.getElementById('refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', () => location.reload());
 """
 
+
+def _page(title: str, body: str) -> str:
+    fh = html.escape(FRAMBOISE_HOST)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>{_CSS}</style>
+</head>
+<body>
+  <header>
+    <h1>Backer &mdash; <em>{fh}</em></h1>
+    <nav class="topnav">
+      <a href="/">Dashboard</a><a href="/how-to">How to back up</a>
+    </nav>
+  </header>
+  {body}
+  <footer>Backer &bull; backup root: <code>{html.escape(str(BACKUP_ROOT))}</code></footer>
+  <script>{_JS}</script>
+</body>
+</html>"""
+
+
+def _codeblock(code: str, label: str = "") -> str:
+    escaped = html.escape(code)
+    lbl = f'<span class="label">{html.escape(label)}</span>' if label else ""
+    return (
+        f'<div class="codeblock">{lbl}'
+        f'<pre>{escaped}</pre>'
+        f'<button class="copy-btn" data-cmd="{escaped}">copy</button>'
+        f'</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard page
+# ---------------------------------------------------------------------------
 
 def _row(e: dict) -> str:
     sp = html.escape(e["source_path"])
@@ -258,7 +321,7 @@ def _row(e: dict) -> str:
     )
 
 
-def render_html(backups: dict[str, list]) -> str:
+def render_dashboard(backups: dict[str, list]) -> str:
     total_size = sum(e["size"] for entries in backups.values() for e in entries)
     total_files = sum(e["files"] for entries in backups.values() for e in entries)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -282,36 +345,163 @@ def render_html(backups: dict[str, list]) -> str:
     if not backups:
         machines_html = (
             '<p class="empty">No backups found. '
-            f'Is <code>{html.escape(str(BACKUP_ROOT))}</code> mounted?</p>'
+            f'Is <code>{html.escape(str(BACKUP_ROOT))}</code> mounted? '
+            f'See <a href="/how-to">how to back up</a>.</p>'
         )
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Backer &mdash; {html.escape(FRAMBOISE_HOST)}</title>
-  <style>{_CSS}</style>
-</head>
-<body>
-  <header>
-    <h1>Backer &mdash; <em>{html.escape(FRAMBOISE_HOST)}</em>
-      <button id="refresh" class="refresh">&#x21bb; refresh</button>
-    </h1>
-    <p class="meta">Last loaded: {now} &bull; {html.escape(str(BACKUP_ROOT))}</p>
-  </header>
-  <div class="stats">
-    <div class="stat"><div class="val">{len(backups)}</div><div class="lbl">Machines</div></div>
-    <div class="stat"><div class="val">{human_size(total_size)}</div><div class="lbl">Total size</div></div>
-    <div class="stat"><div class="val">{total_files:,}</div><div class="lbl">Files</div></div>
-  </div>
-  {machines_html}
-  <footer>
-    Backer &bull; backup root: <code>{html.escape(str(BACKUP_ROOT))}</code>
-  </footer>
-  <script>{_JS}</script>
-</body>
-</html>"""
+    body = (
+        f'<p class="meta">Last loaded: {now}</p>'
+        f'<button id="refresh" class="refresh">&#x21bb; refresh</button>'
+        f'<div class="stats">'
+        f'  <div class="stat"><div class="val">{len(backups)}</div><div class="lbl">Machines</div></div>'
+        f'  <div class="stat"><div class="val">{human_size(total_size)}</div><div class="lbl">Total size</div></div>'
+        f'  <div class="stat"><div class="val">{total_files:,}</div><div class="lbl">Files</div></div>'
+        f'</div>'
+        f'{machines_html}'
+    )
+    return _page(f"Backer — {FRAMBOISE_HOST}", body)
+
+
+# ---------------------------------------------------------------------------
+# How-to page
+# ---------------------------------------------------------------------------
+
+def render_howto() -> str:
+    fh = html.escape(FRAMBOISE_HOST)
+    br = html.escape(str(BACKUP_ROOT))
+
+    get_script = _codeblock(
+        f"scp {FRAMBOISE_HOST}:~/backer/client/push.sh ~/bin/push-to-{FRAMBOISE_HOST}\n"
+        f"chmod +x ~/bin/push-to-{FRAMBOISE_HOST}",
+        label="get the script (run on your machine)",
+    )
+
+    use_script = _codeblock(
+        f"push-to-{FRAMBOISE_HOST} /path/to/directory\n\n"
+        f"# examples\n"
+        f"push-to-{FRAMBOISE_HOST} ~/documents\n"
+        f"push-to-{FRAMBOISE_HOST} ~/projects\n"
+        f"push-to-{FRAMBOISE_HOST} /etc\n"
+        f"push-to-{FRAMBOISE_HOST} /var/www/html",
+        label="run it",
+    )
+
+    manual_rsync = _codeblock(
+        f"rsync -avz --progress --delete \\\n"
+        f"    /path/to/directory/ \\\n"
+        f"    {FRAMBOISE_HOST}:{BACKUP_ROOT}/$(hostname -s)/path/to/directory/",
+        label="manual rsync (equivalent)",
+    )
+
+    ssh_setup = _codeblock(
+        "ssh-keygen -t ed25519 -C \"$(whoami)@$(hostname)\"  # skip if you have a key already\n"
+        f"ssh-copy-id {FRAMBOISE_HOST}",
+        label="one-time SSH key setup",
+    )
+
+    cron_daily = _codeblock(
+        f"# crontab -e\n"
+        f"0 2 * * *  push-to-{FRAMBOISE_HOST} ~/documents >> ~/logs/backer.log 2>&1\n"
+        f"0 2 * * *  push-to-{FRAMBOISE_HOST} ~/projects  >> ~/logs/backer.log 2>&1",
+        label="crontab — run daily at 2 am",
+    )
+
+    cron_launchd = _codeblock(
+        "# save as ~/Library/LaunchAgents/com.backer.documents.plist\n"
+        "# then: launchctl load ~/Library/LaunchAgents/com.backer.documents.plist\n\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\"\n"
+        "  \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        "<plist version=\"1.0\"><dict>\n"
+        "  <key>Label</key><string>com.backer.documents</string>\n"
+        "  <key>ProgramArguments</key><array>\n"
+        f"    <string>/Users/YOU/bin/push-to-{FRAMBOISE_HOST}</string>\n"
+        "    <string>/Users/YOU/documents</string>\n"
+        "  </array>\n"
+        "  <key>StartCalendarInterval</key>\n"
+        "  <dict><key>Hour</key><integer>2</integer>"
+        "<key>Minute</key><integer>0</integer></dict>\n"
+        "  <key>StandardOutPath</key><string>/tmp/backer.log</string>\n"
+        "  <key>StandardErrorPath</key><string>/tmp/backer.log</string>\n"
+        "</dict></plist>",
+        label="macOS launchd — run daily at 2 am",
+    )
+
+    mapping = (
+        f'<div class="mapping">'
+        f'your machine: ~/documents/<br>'
+        f'<span class="arr">&nbsp;&nbsp;&darr; rsync</span><br>'
+        f'{fh}: {br}/&lt;hostname&gt;/Users/YOU/documents/'
+        f'</div>'
+    )
+
+    restore_cmd = (
+        f"rsync -avz --progress \\\n"
+        f"    {FRAMBOISE_HOST}:{BACKUP_ROOT}/<hostname>/path/to/directory/ \\\n"
+        f"    /path/to/directory/"
+    )
+    restore_example = _codeblock(restore_cmd)
+
+    body = f"""
+<div class="guide">
+
+  <section>
+    <h2>Prerequisites</h2>
+    <p>The push script uses SSH to connect to {fh}. Set up a key so it
+    does not prompt for a password on every run:</p>
+    {ssh_setup}
+    <p>You also need <code>rsync</code> installed on your machine
+    (<code>brew install rsync</code> on macOS, or it is usually pre-installed on Linux).</p>
+  </section>
+
+  <section>
+    <h2>Quick start with push.sh</h2>
+    <p><code>client/push.sh</code> wraps rsync with sensible defaults and writes a small
+    marker file so the dashboard can track the original source path.</p>
+    {get_script}
+    {use_script}
+    <p>The script prints the source and destination before syncing, then updates the
+    dashboard automatically. Open <a href="/">the dashboard</a> to confirm.</p>
+  </section>
+
+  <section>
+    <h2>Where files go</h2>
+    <p>The full source path is preserved under your machine's hostname, so restoring
+    to the original location is always unambiguous:</p>
+    {mapping}
+    <p>A hidden <code>.backer-info</code> file is written at each backup root recording
+    the original host, path, user, and timestamp.</p>
+  </section>
+
+  <section>
+    <h2>Manual rsync (without push.sh)</h2>
+    <p>If you prefer to call rsync directly, mirror the same path convention:</p>
+    {manual_rsync}
+    <p><code>--delete</code> removes files from the backup that no longer exist at the
+    source, keeping the backup an exact mirror. Omit it if you want the backup to
+    accumulate deleted files.</p>
+  </section>
+
+  <section>
+    <h2>Automating backups</h2>
+    <p><strong>Linux / Raspberry Pi OS (cron)</strong></p>
+    {cron_daily}
+    <p><strong>macOS (launchd)</strong></p>
+    {cron_launchd}
+  </section>
+
+  <section>
+    <h2>Restoring files</h2>
+    <p>Every backed-up path on the <a href="/">dashboard</a> has a pre-built
+    <strong>restore</strong> copy button. The general form is:</p>
+    {restore_example}
+    <p>Add <code>--dry-run</code> first to preview what would change without
+    touching any files.</p>
+  </section>
+
+</div>"""
+
+    return _page(f"How to back up — {FRAMBOISE_HOST}", body)
 
 
 # ---------------------------------------------------------------------------
@@ -320,12 +510,14 @@ def render_html(backups: dict[str, list]) -> str:
 
 class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path not in ("/", "/index.html"):
+        if self.path in ("/", "/index.html"):
+            body = render_dashboard(get_backups()).encode("utf-8")
+        elif self.path == "/how-to":
+            body = render_howto().encode("utf-8")
+        else:
             self.send_response(404)
             self.end_headers()
             return
-        backups = get_backups()
-        body = render_html(backups).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
