@@ -505,6 +505,12 @@ def render_howto() -> str:
         label="crontab — run daily at 2 am",
     )
 
+    cron_root_only = _codeblock(
+        f"# crontab -e (as root, since that is the only account)\n"
+        f"0 2 * * *  push-to-{FRAMBOISE_HOST} /path/to/directory youruser@{FRAMBOISE_HOST} >> /var/log/backer.log 2>&1",
+        label="crontab on a root-only host — land as youruser instead of root",
+    )
+
     cron_launchd = _codeblock(
         "# save as ~/Library/LaunchAgents/com.backer.documents.plist\n"
         "# then: launchctl load ~/Library/LaunchAgents/com.backer.documents.plist\n\n"
@@ -564,6 +570,16 @@ def render_howto() -> str:
         label="confirm it worked",
     )
 
+    root_only_copyid = _codeblock(
+        f"ssh-copy-id youruser@{FRAMBOISE_HOST}",
+        label="authorize root's key for your account on the destination",
+    )
+
+    root_only_push = _codeblock(
+        f"push-to-{FRAMBOISE_HOST} /path/to/directory youruser@{FRAMBOISE_HOST}",
+        label="push, landing as youruser instead of root",
+    )
+
     body = f"""
 <div class="guide">
 
@@ -599,6 +615,21 @@ def render_howto() -> str:
   </section>
 
   <section>
+    <h2>Pushing from a server with no non-root user</h2>
+    <p>Routers, appliances, and some minimal Linux installs only have a
+    <code>root</code> account. Since the push script has no per-host default user,
+    it simply connects as whoever invoked it &mdash; so running it as root logs
+    into {fh} as root too, landing your files under <code>/root/...</code> there.</p>
+    <p>To land in a normal account on {fh} instead, pass <code>youruser@{fh}</code>
+    as the second argument. Authorize root's SSH key for that account first:</p>
+    {root_only_copyid}
+    {root_only_push}
+    <p>The local source path (and the <code>.backer-info</code> metadata) still records
+    <code>root</code> as the source user &mdash; that just describes who ran the push on
+    the source machine, and is unrelated to which account it logs into on {fh}.</p>
+  </section>
+
+  <section>
     <h2>Where files go</h2>
     <p>The full source path is preserved under your machine's hostname, so restoring
     to the original location is always unambiguous:</p>
@@ -620,6 +651,10 @@ def render_howto() -> str:
     <h2>Automating backups</h2>
     <p><strong>Linux / Raspberry Pi OS (cron)</strong></p>
     {cron_daily}
+    <p><strong>Root-only hosts</strong> (routers, appliances) &mdash; pass
+    <code>youruser@{fh}</code> as the second argument so the scheduled push
+    doesn't land as root on {fh}:</p>
+    {cron_root_only}
     <p><strong>macOS (launchd)</strong></p>
     {cron_launchd}
   </section>
