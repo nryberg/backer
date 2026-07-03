@@ -339,7 +339,7 @@ _JS = """
 """
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, footer_extra: str = "") -> str:
     fh = html.escape(FRAMBOISE_HOST)
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -360,7 +360,7 @@ def _page(title: str, body: str) -> str:
     </nav>
   </header>
   {body}
-  <footer>Backer &bull; backup root: <code>{html.escape(str(BACKUP_ROOT))}</code></footer>
+  <footer>Backer &bull; backup root: <code>{html.escape(str(BACKUP_ROOT))}</code>{footer_extra}</footer>
   <script>{_JS}</script>
 </body>
 </html>"""
@@ -590,6 +590,16 @@ def render_howto() -> str:
         label="push using the IP instead of the hostname",
     )
 
+    tailscale_check_resolv = _codeblock(
+        "cat /etc/resolv.conf",
+        label="check whether this device is actually using Tailscale's resolver",
+    )
+
+    tailscale_accept_dns = _codeblock(
+        "sudo tailscale set --accept-dns=true",
+        label="tell tailscaled on this device to manage DNS",
+    )
+
     body = f"""
 <div class="guide">
 
@@ -650,10 +660,21 @@ def render_howto() -> str:
     <p><strong>Quick fix:</strong> use {fh}'s Tailscale IP instead of its hostname:</p>
     {tailscale_find_ip}
     {tailscale_push}
-    <p><strong>Lasting fix:</strong> enable
-    <a href="https://login.tailscale.com/admin/dns">MagicDNS</a> in the Tailscale
-    admin console. Once on, every device in your tailnet can resolve <code>{fh}</code>
-    by name with no per-host setup.</p>
+    <p><strong>If MagicDNS is already enabled tailnet-wide</strong> (check the
+    <a href="https://login.tailscale.com/admin/dns">admin console</a>) but one
+    specific device still can't resolve <code>{fh}</code>, the tailnet setting isn't
+    the problem &mdash; that device just isn't using it. Check what it's actually
+    resolving with:</p>
+    {tailscale_check_resolv}
+    <p>Look for a <code>nameserver 100.100.100.100</code> line and a
+    <code>search &hellip;.ts.net</code> line. If either is missing, tell tailscaled on
+    that device to manage DNS:</p>
+    {tailscale_accept_dns}
+    <p>If <code>/etc/resolv.conf</code> still doesn't show Tailscale's resolver after
+    that, the device likely has no DNS manager Tailscale can hook into &mdash; common
+    on minimal, root-only installs (routers, appliances, embedded Linux) that lack
+    <code>systemd-resolved</code> or NetworkManager. On those, the IP address above is
+    the reliable option, not a workaround to eventually replace.</p>
   </section>
 
   <section>
@@ -697,7 +718,12 @@ def render_howto() -> str:
 
 </div>"""
 
-    return _page(f"How to back up — {FRAMBOISE_HOST}", body)
+    page_updated = datetime.fromtimestamp(os.path.getmtime(__file__)).strftime("%Y-%m-%d")
+    footer_extra = (
+        f" &bull; page content last updated {page_updated}"
+        f" &bull; restart the service if this looks stale"
+    )
+    return _page(f"How to back up — {FRAMBOISE_HOST}", body, footer_extra)
 
 
 # ---------------------------------------------------------------------------
