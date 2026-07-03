@@ -580,6 +580,16 @@ def render_howto() -> str:
         label="push, landing as youruser instead of root",
     )
 
+    tailscale_find_ip = _codeblock(
+        f"tailscale status | grep {FRAMBOISE_HOST}",
+        label="find framboise's Tailscale IP",
+    )
+
+    tailscale_push = _codeblock(
+        f"push-to-{FRAMBOISE_HOST} /path/to/directory youruser@100.x.x.x",
+        label="push using the IP instead of the hostname",
+    )
+
     body = f"""
 <div class="guide">
 
@@ -627,6 +637,23 @@ def render_howto() -> str:
     <p>The local source path (and the <code>.backer-info</code> metadata) still records
     <code>root</code> as the source user &mdash; that just describes who ran the push on
     the source machine, and is unrelated to which account it logs into on {fh}.</p>
+  </section>
+
+  <section>
+    <h2>Connecting over Tailscale ({fh} not resolving)</h2>
+    <p>If <code>ssh</code> or <code>ssh-copy-id</code> fails with
+    <code>Could not resolve hostname {fh}</code>, the source machine has no way to
+    look up the plain hostname. This is common when connecting between two
+    Tailscale nodes that aren't on the same LAN &mdash; on a Mac, <code>{fh}</code>
+    might "just work" via Bonjour/mDNS locally, but that doesn't extend over
+    Tailscale.</p>
+    <p><strong>Quick fix:</strong> use {fh}'s Tailscale IP instead of its hostname:</p>
+    {tailscale_find_ip}
+    {tailscale_push}
+    <p><strong>Lasting fix:</strong> enable
+    <a href="https://login.tailscale.com/admin/dns">MagicDNS</a> in the Tailscale
+    admin console. Once on, every device in your tailnet can resolve <code>{fh}</code>
+    by name with no per-host setup.</p>
   </section>
 
   <section>
