@@ -600,6 +600,11 @@ def render_howto() -> str:
         label="tell tailscaled on this device to manage DNS",
     )
 
+    tailscale_hosts_entry = _codeblock(
+        f"echo '100.x.x.x {FRAMBOISE_HOST}' | sudo tee -a /etc/hosts",
+        label="pin framboise's Tailscale IP in /etc/hosts (one-time, survives reboots)",
+    )
+
     body = f"""
 <div class="guide">
 
@@ -675,6 +680,14 @@ def render_howto() -> str:
     on minimal, root-only installs (routers, appliances, embedded Linux) that lack
     <code>systemd-resolved</code> or NetworkManager. On those, the IP address above is
     the reliable option, not a workaround to eventually replace.</p>
+    <p><strong>Recommended for those boxes:</strong> pin the IP once instead of typing
+    it on every command:</p>
+    {tailscale_hosts_entry}
+    <p>After that, plain <code>ssh {fh}</code> and <code>push-to-{fh}</code> work with no
+    per-command IP needed. This won't auto-update if {fh}'s Tailscale IP ever changes
+    (rare, but possible if the node is removed and re-added) &mdash; if
+    <code>ssh {fh}</code> suddenly stops connecting, re-check the IP and update the
+    line in <code>/etc/hosts</code>.</p>
   </section>
 
   <section>
