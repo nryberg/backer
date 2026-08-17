@@ -22,6 +22,12 @@ PORT = int(os.environ.get("PORT", "8765"))
 HOST = "0.0.0.0"
 FRAMBOISE_HOST = os.environ.get("FRAMBOISE_HOST", "framboise")
 MANIFEST_FILENAME = ".backer-info"
+# Where reported job failures are kept. Outside BACKUP_ROOT so dashboard state
+# never mixes with backed-up data, and in $HOME so the service user can write it.
+FAILURE_LOG = Path(
+    os.environ.get("BACKER_FAILURE_LOG", str(Path.home() / ".backer-failures.json"))
+)
+MAX_FAILURES = 25
 
 
 def human_size(size_bytes: int) -> str:
@@ -247,6 +253,94 @@ def _prune_empty_parents(start: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Reported job failures
+#
+# A scheduler (Clocktower) POSTs here when a backup job fails, so failures
+# surface on the dashboard instead of only in the scheduler's own UI. One
+# record is kept per job name — the newest — and it stays until dismissed.
+# ---------------------------------------------------------------------------
+
+def load_failures() -> list[dict]:
+    try:
+        data = json.loads(FAILURE_LOG.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_failures(failures: list[dict]) -> None:
+    try:
+        FAILURE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        tmp = FAILURE_LOG.with_suffix(".tmp")
+        tmp.write_text(json.dumps(failures, indent=2))
+        tmp.replace(FAILURE_LOG)
+    except OSError as exc:
+        print(f"could not write failure log: {exc}", flush=True)
+
+
+def record_failure(payload: dict) -> dict:
+    """Store one failure report, replacing any earlier one for the same job."""
+    def field(key: str, limit: int = 2000) -> str:
+        value = payload.get(key)
+        if value is None:
+            return ""
+        return str(value)[-limit:]
+
+    entry = {
+        "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "job_name": field("job_name", 120) or "unnamed job",
+        "job_id": payload.get("job_id"),
+        "run_id": payload.get("run_id"),
+        "exit_code": payload.get("exit_code"),
+        "stdout": field("stdout"),
+        "stderr": field("stderr"),
+    }
+    failures = [f for f in load_failures() if f.get("job_name") != entry["job_name"]]
+    failures.insert(0, entry)
+    save_failures(failures[:MAX_FAILURES])
+    return entry
+
+
+def clear_failures() -> int:
+    count = len(load_failures())
+    save_failures([])
+    return count
+
+
+def render_failures(failures: list[dict]) -> str:
+    if not failures:
+        return ""
+    rows = ""
+    for f in failures:
+        detail = (f.get("stderr") or f.get("stdout") or "").strip()
+        exit_code = f.get("exit_code")
+        meta = f'exit {html.escape(str(exit_code))}' if exit_code is not None else "failed"
+        run = f' &middot; run {html.escape(str(f["run_id"]))}' if f.get("run_id") else ""
+        rows += (
+            f'<div class="fail-item">'
+            f'  <div class="fail-head">'
+            f'    <strong>{html.escape(str(f.get("job_name", "")))}</strong>'
+            f'    <span class="fail-meta">{meta}{run} &middot; '
+            f'{html.escape(str(f.get("received_at", "")))}</span>'
+            f'  </div>'
+            + (f'<pre class="fail-detail">{html.escape(detail[-600:])}</pre>' if detail else "")
+            + f'</div>'
+        )
+    plural = "failure" if len(failures) == 1 else "failures"
+    return (
+        f'<div class="failures">'
+        f'  <div class="fail-title">'
+        f'    <span>&#9888; {len(failures)} reported backup {plural}</span>'
+        f'    <form method="POST" action="/failures/clear">'
+        f'      <button type="submit" class="fail-dismiss">dismiss</button>'
+        f'    </form>'
+        f'  </div>'
+        f'  {rows}'
+        f'</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # HTML rendering — shared chrome
 # ---------------------------------------------------------------------------
 
@@ -380,6 +474,26 @@ _CSS = """
   .banner.ok   { border-left: 4px solid var(--ok); }
   .banner.err  { border-left: 4px solid var(--bad); }
   .banner code { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  /* reported failures */
+  .failures { border: 1px solid var(--bad); border-left: 4px solid var(--bad);
+              border-radius: 6px; background: var(--card); padding: 0.85rem 1rem;
+              margin-bottom: 1.5rem; }
+  .fail-title { display: flex; align-items: center; justify-content: space-between;
+                gap: 1rem; font-size: 0.9rem; font-weight: 700; color: var(--bad);
+                margin-bottom: 0.6rem; }
+  .fail-dismiss { font-size: 0.75rem; padding: 0.25rem 0.7rem; background: none;
+                  color: var(--muted); border: 1px solid var(--border);
+                  border-radius: 5px; cursor: pointer; }
+  .fail-dismiss:hover { color: var(--fg); }
+  .fail-item { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+  .fail-item:first-of-type { border-top: none; }
+  .fail-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+               font-size: 0.88rem; }
+  .fail-meta { font-size: 0.78rem; color: var(--muted); }
+  .fail-detail { font-family: ui-monospace, monospace; font-size: 0.75rem;
+                 background: var(--code-bg); border-radius: 4px; padding: 0.5rem 0.7rem;
+                 margin-top: 0.4rem; white-space: pre-wrap; word-break: break-word;
+                 max-height: 9rem; overflow-y: auto; color: var(--fg); }
   /* search */
   .search-wrap { margin-bottom: 1.5rem; }
   #search { width: 100%; max-width: 28rem; padding: 0.5rem 0.85rem;
@@ -708,6 +822,7 @@ def render_dashboard(backups: dict[str, list], notice: str = "", error: str = ""
 
     body = (
         f'{banner}'
+        f'{render_failures(load_failures())}'
         f'<p class="meta">Last loaded: {now}</p>'
         f'<button id="refresh" class="refresh">&#x21bb; refresh</button>'
         f'<div class="stats">'
@@ -1008,6 +1123,8 @@ def render_howto() -> str:
 # ---------------------------------------------------------------------------
 
 MAX_POST_BYTES = 8192
+# Clocktower's failure payload carries two output fields capped at 8000 chars each
+MAX_WEBHOOK_BYTES = 65536
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1034,7 +1151,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/delete":
+        route = urlparse(self.path).path
+        if route == "/webhook/failure":
+            self._webhook_failure()
+            return
+        if route == "/failures/clear":
+            count = clear_failures()
+            print(f"dismissed {count} failure report(s)", flush=True)
+            self._redirect_home(notice=f"Dismissed {count} failure report(s).")
+            return
+        if route != "/delete":
             self.send_response(404)
             self.end_headers()
             return
@@ -1058,6 +1184,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._redirect_home(notice=message)
         else:
             self._redirect_home(error=message)
+
+    def _webhook_failure(self) -> None:
+        """Receive a scheduler's failure notification (Clocktower's payload shape)."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_WEBHOOK_BYTES:
+            self._json(400, {"error": "missing or oversized body"})
+            return
+
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            self._json(400, {"error": "body is not valid JSON"})
+            return
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "expected a JSON object"})
+            return
+
+        entry = record_failure(payload)
+        print(
+            f"failure reported: job={entry['job_name']!r} "
+            f"run={entry['run_id']} exit={entry['exit_code']}",
+            flush=True,
+        )
+        self._json(200, {"ok": True, "recorded_at": entry["received_at"]})
+
+    def _json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _redirect_home(self, notice: str = "", error: str = "") -> None:
         key, value = ("deleted", notice) if notice else ("error", error)
