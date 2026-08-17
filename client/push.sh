@@ -38,11 +38,15 @@ echo ""
 # Create destination directory
 ssh "$FRAMBOISE" "mkdir -p '${DEST_PATH}'"
 
-# Sync — delete removes files from dest that no longer exist at source
+# Sync — delete removes files from dest that no longer exist at source.
+# The remote path is single-quoted because rsync hands it to the remote shell
+# verbatim: without quotes a path containing a space (e.g. "Mobile Documents")
+# gets word-split and the files land in a truncated directory. --protect-args
+# would also fix it, but macOS ships openrsync, which does not support it.
 rsync -avz --progress --delete \
   --exclude=".backer-info" \
   "${SOURCE}/" \
-  "${FRAMBOISE}:${DEST_PATH}/"
+  "${FRAMBOISE}:'${DEST_PATH}/'"
 
 # Write a manifest marker so the dashboard knows this is a tracked backup root
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)

@@ -11,9 +11,11 @@ Listens on 0.0.0.0:8765 by default; configure via environment variables.
 import html
 import json
 import os
+import shutil
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
 
 BACKUP_ROOT = Path(os.environ.get("BACKUP_ROOT", "/mnt/backup"))
 PORT = int(os.environ.get("PORT", "8765"))
@@ -182,6 +184,69 @@ def _make_entry(
 
 
 # ---------------------------------------------------------------------------
+# Deletion
+# ---------------------------------------------------------------------------
+
+def delete_backup(raw_path: str) -> tuple[bool, str]:
+    """
+    Delete one backup directory tree. Returns (ok, message).
+
+    Only paths that the dashboard currently lists as a backup root can be
+    deleted: the request path must match one of them exactly. That rules out
+    traversal, symlink escapes, and deleting BACKUP_ROOT or a whole host dir,
+    without needing to reason about string prefixes.
+    """
+    if not raw_path:
+        return False, "No path given."
+
+    known = {
+        e["backup_dir"]
+        for entries in get_backups().values()
+        for e in entries
+    }
+    if raw_path not in known:
+        return False, "That path is not a listed backup — nothing was deleted."
+
+    target = Path(raw_path)
+    # Belt and braces: the real path must still sit inside BACKUP_ROOT.
+    try:
+        root = BACKUP_ROOT.resolve(strict=True)
+        resolved = target.resolve(strict=True)
+        if resolved != root and root not in resolved.parents:
+            return False, "Refusing to delete a path outside the backup root."
+    except OSError:
+        return False, "Could not resolve that path."
+    if resolved == root:
+        return False, "Refusing to delete the backup root itself."
+
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        return False, f"Delete failed: {exc.strerror or exc}"
+
+    _prune_empty_parents(target.parent)
+    return True, f"Deleted {raw_path}"
+
+
+def _prune_empty_parents(start: Path) -> None:
+    """
+    Remove now-empty parent directories left behind by a delete, stopping
+    before BACKUP_ROOT and before any host directory that still has content.
+    """
+    try:
+        root = BACKUP_ROOT.resolve()
+        current = start.resolve()
+    except OSError:
+        return
+    while current != root and root in current.parents:
+        try:
+            current.rmdir()  # raises OSError if not empty
+        except OSError:
+            return
+        current = current.parent
+
+
+# ---------------------------------------------------------------------------
 # HTML rendering — shared chrome
 # ---------------------------------------------------------------------------
 
@@ -268,6 +333,53 @@ _CSS = """
               border-radius: 5px; cursor: pointer; white-space: nowrap; }
   .copy-btn:hover  { opacity: 0.85; }
   .copy-btn.copied { background: var(--btn-ok); }
+  /* delete */
+  .col-del { text-align: right; white-space: nowrap; }
+  .del-btn { font-size: 0.75rem; font-weight: 600; padding: 0.3rem 0.6rem;
+             background: none; color: var(--bad); border: 1px solid var(--bad);
+             border-radius: 5px; cursor: pointer; }
+  .del-btn:hover { background: var(--bad); color: #fff; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+             display: none; align-items: center; justify-content: center;
+             padding: 1.5rem; z-index: 50; }
+  .overlay.open { display: flex; }
+  .modal { background: var(--card); border: 1px solid var(--border);
+           border-top: 4px solid var(--bad); border-radius: 8px;
+           max-width: 34rem; width: 100%; padding: 1.4rem 1.5rem;
+           max-height: 90vh; overflow-y: auto; }
+  .modal h3 { font-size: 1.1rem; margin-bottom: 0.9rem; color: var(--bad); }
+  .modal p { font-size: 0.87rem; line-height: 1.6; margin-bottom: 0.7rem; }
+  .modal .target { font-family: ui-monospace, monospace; font-size: 0.8rem;
+                   background: var(--code-bg); border: 1px solid var(--border);
+                   border-radius: 5px; padding: 0.6rem 0.75rem; margin: 0.4rem 0 0.9rem;
+                   word-break: break-all; }
+  .modal .facts { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.9rem; }
+  .modal ul.warn { list-style: none; padding: 0; margin: 0 0 1rem; }
+  .modal ul.warn li { font-size: 0.85rem; line-height: 1.55; padding-left: 1.4rem;
+                      position: relative; margin-bottom: 0.45rem; }
+  .modal ul.warn li::before { content: "!"; position: absolute; left: 0; top: 0;
+                              font-weight: 700; color: var(--bad); }
+  .modal label { display: block; font-size: 0.82rem; margin-bottom: 0.35rem; }
+  .modal label code { background: var(--code-bg); padding: 0.1rem 0.3rem; border-radius: 3px; }
+  .modal input[type=text] { width: 100%; padding: 0.45rem 0.7rem; font-size: 0.9rem;
+                            font-family: ui-monospace, monospace;
+                            border: 1px solid var(--border); border-radius: 5px;
+                            background: var(--bg); color: var(--fg); outline: none; }
+  .modal input[type=text]:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end;
+                   margin-top: 1.2rem; }
+  .btn-cancel { font-size: 0.85rem; padding: 0.45rem 1rem; background: none;
+                color: var(--fg); border: 1px solid var(--border);
+                border-radius: 5px; cursor: pointer; }
+  .btn-danger { font-size: 0.85rem; font-weight: 600; padding: 0.45rem 1rem;
+                background: var(--bad); color: #fff; border: none;
+                border-radius: 5px; cursor: pointer; }
+  .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+  .banner { border-radius: 6px; padding: 0.7rem 1rem; margin-bottom: 1.25rem;
+            font-size: 0.87rem; border: 1px solid var(--border); background: var(--card); }
+  .banner.ok   { border-left: 4px solid var(--ok); }
+  .banner.err  { border-left: 4px solid var(--bad); }
+  .banner code { font-family: ui-monospace, monospace; font-size: 0.8rem; }
   /* search */
   .search-wrap { margin-bottom: 1.5rem; }
   #search { width: 100%; max-width: 28rem; padding: 0.5rem 0.85rem;
@@ -358,6 +470,50 @@ _JS = """
   }
 
   (function() {
+    const overlay = document.getElementById('del-overlay');
+    if (!overlay) return;
+    const form    = document.getElementById('del-form');
+    const input   = document.getElementById('del-confirm');
+    const submit  = document.getElementById('del-submit');
+    let expected  = '';
+
+    function close() {
+      overlay.classList.remove('open');
+      input.value = '';
+      submit.disabled = true;
+    }
+    function sync() {
+      submit.disabled = input.value.trim() !== expected;
+    }
+    document.querySelectorAll('.del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const d = btn.dataset;
+        expected = d.token;
+        form.querySelector('input[name=path]').value = d.path;
+        document.getElementById('del-target').textContent = d.path;
+        document.getElementById('del-host').textContent = d.host;
+        document.getElementById('del-source').textContent = d.source;
+        document.getElementById('del-facts').textContent =
+          d.files + ' files, ' + d.size + ', last backed up ' + d.age;
+        document.getElementById('del-token').textContent = d.token;
+        overlay.classList.add('open');
+        input.focus();
+        sync();
+      });
+    });
+    input.addEventListener('input', sync);
+    document.getElementById('del-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && overlay.classList.contains('open')) close();
+    });
+    form.addEventListener('submit', e => {
+      if (input.value.trim() !== expected) e.preventDefault();
+      else submit.disabled = true;  // guard against a double submit
+    });
+  })();
+
+  (function() {
     const root = document.documentElement;
     const btn  = document.getElementById('theme-toggle');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -423,7 +579,7 @@ def _codeblock(code: str, label: str = "") -> str:
 # Dashboard page
 # ---------------------------------------------------------------------------
 
-def _row(e: dict) -> str:
+def _row(e: dict, hostname: str) -> str:
     sp = html.escape(e["source_path"])
     restore = html.escape(e["restore_cmd"])
     fetch = html.escape(e["fetch_cmd"])
@@ -458,26 +614,86 @@ def _row(e: dict) -> str:
         f'    <code class="cmd-text" title="{push}">{push}</code>'
         f'  </div>'
         f'</td>'
+        f'<td class="col-del">{_delete_button(e, hostname)}</td>'
         f'</tr>'
     )
 
 
-def render_dashboard(backups: dict[str, list]) -> str:
+def _delete_button(e: dict, hostname: str) -> str:
+    """Per-row delete trigger. All confirmation happens in the shared modal."""
+    days = e["days_since"]
+    age = "never (empty)" if days is None else f'{days:,} {e["age_label"]} ago'
+    # Typing this word is what unlocks the delete — the last path segment,
+    # which is specific enough that it cannot be confirmed by reflex.
+    token = e["source_path"].rstrip("/").rsplit("/", 1)[-1] or hostname
+    return (
+        f'<button class="del-btn" type="button"'
+        f' data-path="{html.escape(e["backup_dir"])}"'
+        f' data-source="{html.escape(e["source_path"])}"'
+        f' data-host="{html.escape(hostname)}"'
+        f' data-size="{html.escape(e["size_human"])}"'
+        f' data-files="{e["files"]:,}"'
+        f' data-age="{html.escape(age)}"'
+        f' data-token="{html.escape(token)}"'
+        f'>delete</button>'
+    )
+
+
+_DELETE_MODAL = """
+<div class="overlay" id="del-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="del-title">
+    <h3 id="del-title">Delete this backup?</h3>
+    <p>This permanently removes the backed-up copy stored on this machine:</p>
+    <div class="target" id="del-target"></div>
+    <div class="facts" id="del-facts"></div>
+    <ul class="warn">
+      <li><strong>This cannot be undone.</strong> There is no trash and no
+          snapshot &mdash; the files are erased from the backup drive.</li>
+      <li>If the source machine (<strong><span id="del-host"></span></strong>) is
+          gone, wiped, or its copy of
+          <code><span id="del-source"></span></code> has changed, this backup is
+          the only copy of what it held.</li>
+      <li>Files still on the source machine are <em>not</em> touched. A later
+          push will recreate this backup from scratch.</li>
+    </ul>
+    <form method="POST" action="/delete" id="del-form">
+      <input type="hidden" name="path" value="">
+      <label for="del-confirm">Type <code id="del-token"></code> to confirm:</label>
+      <input type="text" id="del-confirm" autocomplete="off" spellcheck="false">
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="del-cancel">Cancel</button>
+        <button type="submit" class="btn-danger" id="del-submit" disabled>Delete backup</button>
+      </div>
+    </form>
+  </div>
+</div>"""
+
+
+def render_dashboard(backups: dict[str, list], notice: str = "", error: str = "") -> str:
     total_size = sum(e["size"] for entries in backups.values() for e in entries)
     total_files = sum(e["files"] for entries in backups.values() for e in entries)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    banner = ""
+    if error:
+        banner = f'<div class="banner err">{html.escape(error)}</div>'
+    elif notice:
+        banner = f'<div class="banner ok">{html.escape(notice)}</div>'
+
     machines_html = ""
     for hostname, entries in sorted(backups.items()):
         host_size = human_size(sum(e["size"] for e in entries))
-        rows = "".join(_row(e) for e in sorted(entries, key=lambda x: x["source_path"]))
+        rows = "".join(
+            _row(e, hostname) for e in sorted(entries, key=lambda x: x["source_path"])
+        )
         machines_html += (
             f'<div class="machine" data-host="{html.escape(hostname)}">'
             f'  <h2><strong>{html.escape(hostname)}</strong>'
             f'      <span class="total">{html.escape(host_size)}</span></h2>'
             f'  <table>'
             f'    <thead><tr><th>Path</th><th class="col-age">Age</th>'
-            f'               <th>Size</th><th>Files</th><th>Commands</th></tr></thead>'
+            f'               <th>Size</th><th>Files</th><th>Commands</th>'
+            f'               <th></th></tr></thead>'
             f'    <tbody>{rows}</tbody>'
             f'  </table>'
             f'</div>'
@@ -491,6 +707,7 @@ def render_dashboard(backups: dict[str, list]) -> str:
         )
 
     body = (
+        f'{banner}'
         f'<p class="meta">Last loaded: {now}</p>'
         f'<button id="refresh" class="refresh">&#x21bb; refresh</button>'
         f'<div class="stats">'
@@ -502,6 +719,7 @@ def render_dashboard(backups: dict[str, list]) -> str:
         f'  <input id="search" type="search" placeholder="Filter by hostname or path&hellip;" autocomplete="off">'
         f'</div>'
         f'{machines_html}'
+        f'{_DELETE_MODAL if backups else ""}'
     )
     return _page(f"Backer — {FRAMBOISE_HOST}", body)
 
@@ -789,11 +1007,21 @@ def render_howto() -> str:
 # HTTP server
 # ---------------------------------------------------------------------------
 
+MAX_POST_BYTES = 8192
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
-            body = render_dashboard(get_backups()).encode("utf-8")
-        elif self.path == "/how-to":
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        if parsed.path in ("/", "/index.html"):
+            page = render_dashboard(
+                get_backups(),
+                notice=query.get("deleted", [""])[0],
+                error=query.get("error", [""])[0],
+            )
+            body = page.encode("utf-8")
+        elif parsed.path == "/how-to":
             body = render_howto().encode("utf-8")
         else:
             self.send_response(404)
@@ -804,6 +1032,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        if urlparse(self.path).path != "/delete":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length < 0 or length > MAX_POST_BYTES:
+            self._redirect_home(error="Request too large.")
+            return
+
+        raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        path = parse_qs(raw).get("path", [""])[0]
+
+        ok, message = delete_backup(path)
+        if ok:
+            # flush so journald records the audit line immediately — stdout is
+            # block-buffered when systemd hands us a pipe instead of a tty
+            print(f"deleted backup: {path}", flush=True)
+            self._redirect_home(notice=message)
+        else:
+            self._redirect_home(error=message)
+
+    def _redirect_home(self, notice: str = "", error: str = "") -> None:
+        key, value = ("deleted", notice) if notice else ("error", error)
+        self.send_response(303)
+        self.send_header("Location", f"/?{key}={quote(value)}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, fmt, *args):
         pass  # suppress per-request log noise; errors still go to stderr
