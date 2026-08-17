@@ -1,0 +1,36 @@
+[Unit]
+Description=Backer Agent — HTTP-triggered backups
+Documentation=https://github.com/nryberg/backer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/backer-agent
+
+# What to back up. BACKER_SQLITE databases are snapshotted through SQLite's
+# online backup API (safe while being written); BACKER_PATHS are pushed as-is.
+# Both take colon-separated lists. The values below are this host's config —
+# adjust per machine.
+Environment=BACKER_SQLITE=/opt/clocktower/clocktower.db
+Environment=BACKER_STAGING=/var/backups/backer-agent
+
+# push.sh and where it sends data. On a root-only host, name a normal account
+# on the destination so files do not land under /root there.
+Environment=PUSH_SCRIPT=/root/bin/push-to-framboise
+Environment=PUSH_TARGET=nick@framboise
+
+Environment=BACKER_AGENT_PORT=8770
+# Uncomment to require a shared secret on POST /backup:
+# Environment=BACKER_TOKEN=change-me
+
+ExecStart=/usr/bin/python3 /opt/backer-agent/backer-agent.py
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backer-agent
+
+[Install]
+WantedBy=multi-user.target
