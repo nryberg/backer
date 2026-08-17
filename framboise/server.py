@@ -37,7 +37,8 @@ def dir_stats(path: Path) -> tuple[int, int, float]:
         for entry in path.rglob("*"):
             if entry.name == MANIFEST_FILENAME:
                 continue
-            if entry.is_file(follow_symlinks=False):
+            # is_file(follow_symlinks=…) needs Python 3.13; spell it out for older
+            if entry.is_file() and not entry.is_symlink():
                 try:
                     st = entry.stat()
                     total += st.st_size
@@ -121,6 +122,25 @@ def get_backups() -> dict[str, list[dict]]:
     return result
 
 
+def days_since(newest: float) -> int | None:
+    """Whole days between the newest file's mtime and now; None if unknown."""
+    if not newest:
+        return None
+    delta = datetime.now() - datetime.fromtimestamp(newest)
+    return max(delta.days, 0)
+
+
+def age_class(days: int | None) -> str:
+    """Staleness bucket used to colour the hero number."""
+    if days is None:
+        return "age-unknown"
+    if days <= 7:
+        return "age-ok"
+    if days <= 30:
+        return "age-warn"
+    return "age-bad"
+
+
 def _make_entry(
     hostname: str,
     source_path: str,
@@ -132,6 +152,7 @@ def _make_entry(
 ) -> dict:
     dest = str(backup_dir)
     user_prefix = f"{source_user}@{hostname}:" if source_user else f"{hostname}:"
+    age = days_since(newest)
     return {
         "source_path": source_path,
         "source_user": source_user,
@@ -139,6 +160,9 @@ def _make_entry(
         "size": size,
         "size_human": human_size(size),
         "files": count,
+        "days_since": age,
+        "age_class": age_class(age),
+        "age_label": "day" if age == 1 else "days",
         "last_sync_str": (
             datetime.fromtimestamp(newest).strftime("%Y-%m-%d") if newest else "—"
         ),
@@ -166,23 +190,27 @@ _CSS = """
     --bg: #f8f9fa; --fg: #212529; --muted: #6c757d;
     --border: #dee2e6; --card: #fff; --accent: #0d6efd;
     --code-bg: #e9ecef; --btn: #0d6efd; --btn-fg: #fff; --btn-ok: #198754;
+    --ok: #198754; --warn: #b76e00; --bad: #c62828;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e;
       --border: #30363d; --card: #161b22; --accent: #58a6ff;
       --code-bg: #1c2128; --btn: #1f6feb; --btn-fg: #fff; --btn-ok: #238636;
+      --ok: #3fb950; --warn: #d29922; --bad: #f85149;
     }
   }
   html.dark {
     --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e;
     --border: #30363d; --card: #161b22; --accent: #58a6ff;
     --code-bg: #1c2128; --btn: #1f6feb; --btn-fg: #fff; --btn-ok: #238636;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149;
   }
   html.light {
     --bg: #f8f9fa; --fg: #212529; --muted: #6c757d;
     --border: #dee2e6; --card: #fff; --accent: #0d6efd;
     --code-bg: #e9ecef; --btn: #0d6efd; --btn-fg: #fff; --btn-ok: #198754;
+    --ok: #198754; --warn: #b76e00; --bad: #c62828;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -214,6 +242,17 @@ _CSS = """
   td { padding: 0.55rem 0.85rem; border-top: 1px solid var(--border); vertical-align: top; }
   .col-path { font-family: ui-monospace, monospace; font-size: 0.84rem; }
   .col-num  { text-align: right; white-space: nowrap; color: var(--muted); }
+  /* hero: days since last backup */
+  .col-age  { text-align: center; white-space: nowrap; width: 6.5rem; }
+  .age-num  { font-size: 2.1rem; font-weight: 700; line-height: 1;
+              font-variant-numeric: tabular-nums; }
+  .age-unit { font-size: 0.68rem; color: var(--muted); text-transform: uppercase;
+              letter-spacing: 0.05em; margin-top: 0.2rem; }
+  .age-date { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
+  .age-ok .age-num      { color: var(--ok); }
+  .age-warn .age-num    { color: var(--warn); }
+  .age-bad .age-num     { color: var(--bad); }
+  .age-unknown .age-num { color: var(--muted); font-size: 1.6rem; }
   .col-cmds { min-width: 26rem; }
   .cmd-row  { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.3rem; }
   .cmd-row:last-child { margin-bottom: 0; }
@@ -389,12 +428,19 @@ def _row(e: dict) -> str:
     restore = html.escape(e["restore_cmd"])
     fetch = html.escape(e["fetch_cmd"])
     push = html.escape(e["push_cmd"])
+    days = e["days_since"]
+    age_num = "—" if days is None else f"{days:,}"
+    age_unit = "unknown" if days is None else f'{html.escape(e["age_label"])} ago'
     return (
         f'<tr>'
         f'<td class="col-path">{sp}</td>'
+        f'<td class="col-age {e["age_class"]}">'
+        f'  <div class="age-num">{age_num}</div>'
+        f'  <div class="age-unit">{age_unit}</div>'
+        f'  <div class="age-date">{html.escape(e["last_sync_str"])}</div>'
+        f'</td>'
         f'<td class="col-num">{html.escape(e["size_human"])}</td>'
         f'<td class="col-num">{e["files"]:,}</td>'
-        f'<td class="col-num">{html.escape(e["last_sync_str"])}</td>'
         f'<td class="col-cmds">'
         f'  <div class="cmd-row">'
         f'    <button class="copy-btn" data-cmd="{restore}">copy</button>'
@@ -430,8 +476,8 @@ def render_dashboard(backups: dict[str, list]) -> str:
             f'  <h2><strong>{html.escape(hostname)}</strong>'
             f'      <span class="total">{html.escape(host_size)}</span></h2>'
             f'  <table>'
-            f'    <thead><tr><th>Path</th><th>Size</th><th>Files</th>'
-            f'               <th>Last&nbsp;Sync</th><th>Commands</th></tr></thead>'
+            f'    <thead><tr><th>Path</th><th class="col-age">Age</th>'
+            f'               <th>Size</th><th>Files</th><th>Commands</th></tr></thead>'
             f'    <tbody>{rows}</tbody>'
             f'  </table>'
             f'</div>'
